@@ -80,19 +80,22 @@ class ElasticSearchScheduler(masterUrl: String,
   }
 
   def resourceOffers(driver: SchedulerDriver, offers: util.List[Offer]) {
+    val logstashCommand = CommandInfo.newBuilder
+                                     .addUris(CommandInfo.URI.newBuilder.setValue("http://localhost:9929/logstash-1.4.2.tar.gz"))
+                                     .setValue(List("cd logstash-*",
+                                                    s"curl -sSfLO http://${confServerHostName}:${confServerPort}/logstash.conf",
+                                                    "bin/logstash -f logstash.conf").mkString(" && "))
 
-    // Construct command to run
-    val cmd = CommandInfo.newBuilder
-      .addUris(CommandInfo.URI.newBuilder.setValue(execUri))
-      .setValue(s"cd elasticsearch-mesos* && " +
-      s"cd config && rm elasticsearch.yml " +
-      s"&& curl -sSfLO http://${confServerHostName}:${confServerPort}/elasticsearch.yml " +
-      s"&& rm logging.yml " +
-      s"&& curl -sSfLO http://${confServerHostName}:${confServerPort}/logging.yml " +
-      s"&& cd .. " +
-      s"&& bin/elasticsearch -f")
 
-    // Create all my resources
+    val esCommand = CommandInfo.newBuilder
+                               .addUris(CommandInfo.URI.newBuilder.setValue(execUri))
+                               .setValue(List("cd elasticsearch-mesos*",
+                                              "cd config", "rm -fv elasticsearch.yml logging.yml",
+                                             s"curl -sSfLO http://${confServerHostName}:${confServerPort}/elasticsearch.yml",
+                                             s"curl -sSfLO http://${confServerHostName}:${confServerPort}/logging.yml",
+                                             "cd ..", "bin/elasticsearch -f").mkString(" && "))
+
+    // Create all my es resources
     val res = resources.map {
       case (k, v) => ScalarResource(k, v).toProto
     }
@@ -105,18 +108,24 @@ class ElasticSearchScheduler(masterUrl: String,
 
         info("Accepted offer: " + offer.getHostname)
 
-        val id = s"elasticsearch_${offer.getHostname}_${isoDateFormat.format(new Date())}"
+        val esId = s"elasticsearch_${offer.getHostname}_${isoDateFormat.format(new Date())}"
+        val esTask = TaskInfo.newBuilder.setCommand(esCommand)
+                                        .setName(esId)
+                                        .setTaskId(TaskID.newBuilder.setValue(esId))
+                                        .addAllResources(res.asJava)
+                                        .setSlaveId(offer.getSlaveId)
+                                        .build
 
-        val task = TaskInfo.newBuilder
-          .setCommand(cmd)
-          .setName(id)
-          .setTaskId(TaskID.newBuilder.setValue(id))
-          .addAllResources(res.asJava)
-          .setSlaveId(offer.getSlaveId)
-          .build
+        val lsId = s"logstash${offer.getHostname}_${isoDateFormat.format(new Date())}"
+        val lsTask = TaskInfo.newBuilder.setCommand(logstashCommand)
+                                        .setName(lsId)
+                                        .setTaskId(TaskID.newBuilder.setValue(lsId))
+                                        .addAllResources(res.asJava)
+                                        .setSlaveId(offer.getSlaveId)
+                                        .build
 
-        driver.launchTasks(offer.getId, List(task).asJava)
-        taskSet += Task(id, offer.getHostname)
+        driver.launchTasks(offer.getId, List(esTask, lsTask).asJava)
+        taskSet += Task(esId, offer.getHostname)
       } else {
         debug("Rejecting offer " + offer.getHostname)
         driver.declineOffer(offer.getId)

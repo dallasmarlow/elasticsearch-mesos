@@ -24,3 +24,7 @@ cp config/* elasticsearch-mesos-${PROJVERSION}/config
 cp target/*.jar elasticsearch-mesos*/lib
 
 tar czf elasticsearch-mesos-${PROJVERSION}.tgz elasticsearch-mesos-${PROJVERSION}
+cp -fv elasticsearch-mesos-${PROJVERSION}.tgz resources/
+
+cd resources
+wget https://download.elasticsearch.org/logstash/logstash/logstash-1.4.2.tar.gz
